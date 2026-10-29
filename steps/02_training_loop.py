@@ -1,0 +1,120 @@
+"""2단계: 학습 루프의 뼈대 - optimizer, 배치, gradient accumulation, 학습률 스케줄, grad clipping.
+
+train_lora.py의 학습 루프를 파라미터 2개짜리(직선 맞추기) 문제로 그대로 재현한다.
+    opt = torch.optim.AdamW(params, lr=...)
+    sched = LambdaLR(opt, warmup + 선형 감소)
+    for 예시:
+        loss = ...
+        (loss / accum).backward()
+        if (i+1) % accum == 0:
+            clip_grad_norm_(params, 1.0); opt.step(); sched.step(); opt.zero_grad()
+
+실행:  uv run steps/02_training_loop.py
+       uv run steps/02_training_loop.py --opt sgd --lr 0.1
+       uv run steps/02_training_loop.py --opt adamw --lr 0.1
+       uv run steps/02_training_loop.py --accum 4 --steps 30
+"""
+
+import argparse
+
+import torch
+
+TRUE_W, TRUE_B = 3.0, 1.0
+
+
+def make_data(n: int = 256, seed: int = 0) -> tuple[torch.Tensor, torch.Tensor]:
+    g = torch.Generator().manual_seed(seed)
+    x = torch.rand(n, generator=g) * 6 - 3  # -3 ~ 3
+    y = TRUE_W * x + TRUE_B + 0.3 * torch.randn(n, generator=g)  # 정답 직선 + 잡음
+    return x, y
+
+
+def mse(w, b, x, y) -> torch.Tensor:
+    return ((w * x + b - y) ** 2).mean()
+
+
+def make_scheduler(opt, total_steps: int, warmup_ratio: float):
+    """train_lora.py와 같은 스케줄: warmup 동안 0 -> lr 로 올리고, 그 뒤 total_steps에서 0이 되게 직선으로 내린다."""
+    warmup = max(1, int(total_steps * warmup_ratio))
+    return torch.optim.lr_scheduler.LambdaLR(opt, lambda s: s / warmup if s < warmup else max(0.0, (total_steps - s) / max(1, total_steps - warmup))), warmup
+
+
+def part_a_loop(args) -> None:
+    print("=" * 70)
+    print(f"A. 학습 루프: optimizer={args.opt}, lr={args.lr}, 예시 {args.batch}개씩, accum={args.accum}, optimizer step {args.steps}번")
+    x, y = make_data()
+    w = torch.tensor(0.0, requires_grad=True)
+    b = torch.tensor(0.0, requires_grad=True)
+    params = [w, b]
+    opt = torch.optim.SGD(params, lr=args.lr) if args.opt == "sgd" else torch.optim.AdamW(params, lr=args.lr, weight_decay=0.0)
+    sched, warmup = make_scheduler(opt, args.steps, args.warmup_ratio)
+    print(f"   학습률 스케줄: warmup {warmup} step 동안 0 -> {args.lr}, 그 뒤 step {args.steps}에서 0이 되게 선형 감소")
+
+    g = torch.Generator().manual_seed(1)
+    opt_step, micro = 0, 0
+    while opt_step < args.steps:
+        idx = torch.randint(0, len(x), (args.batch,), generator=g)  # 무작위로 batch개 뽑기 (train_lora는 순서를 섞어 하나씩)
+        loss = mse(w, b, x[idx], y[idx])
+        (loss / args.accum).backward()  # accum개의 평균 기울기가 되도록 미리 나눈다
+        micro += 1
+        if micro % args.accum == 0:
+            # 기울기 벡터 길이가 clip을 넘으면 clip 길이로 줄인다. --clip 0이면 재기만 하고 자르지 않는다
+            norm = torch.nn.utils.clip_grad_norm_(params, args.clip if args.clip > 0 else float("inf"))
+            opt.step()
+            sched.step()
+            opt.zero_grad(set_to_none=True)
+            opt_step += 1
+            if opt_step <= 3 or opt_step % 5 == 0 or opt_step == args.steps:
+                print(f"  step {opt_step:3d}  loss {loss.item():8.4f}  w {w.item():7.3f}  b {b.item():7.3f}  grad_norm {norm.item():8.3f}  lr {sched.get_last_lr()[0]:.4f}")
+    print(f"정답: w={TRUE_W}, b={TRUE_B}.  전체 데이터 loss = {mse(w, b, x, y).item():.4f} (잡음 때문에 0.09 근처가 바닥)")
+
+
+def part_b_accumulation() -> None:
+    print("\n" + "=" * 70)
+    print("B. gradient accumulation: '32개 한 번'과 '16개씩 두 번 더하기'의 기울기는 같다")
+    x, y = make_data()
+    w = torch.tensor(0.0, requires_grad=True)
+    b = torch.tensor(0.0, requires_grad=True)
+
+    mse(w, b, x[:32], y[:32]).backward()
+    print(f"  32개 한 번:            w.grad = {w.grad.item():.6f}")
+    w.grad, b.grad = None, None
+
+    (mse(w, b, x[:16], y[:16]) / 2).backward()  # 첫 16개 - loss를 2로 나눠서 backward (grad가 '더해진다')
+    (mse(w, b, x[16:32], y[16:32]) / 2).backward()  # 다음 16개
+    print(f"  16개씩 두 번(각각 /2): w.grad = {w.grad.item():.6f}   <- 같다")
+    print("  왜 쓰나: GPU 메모리에 한 번에 못 올리는 큰 배치를 작은 조각으로 나눠 같은 효과를 낸다.")
+    print("  train_lora.py는 예시 하나(8k~14k 토큰)씩 forward하고 8개마다 step -> '배치 8'과 같은 기울기")
+
+
+def part_c_clipping() -> None:
+    print("\n" + "=" * 70)
+    print("C. grad clipping: 기울기가 갑자기 커지면(이상한 예시, 긴 시퀀스) 한 step에 파라미터가 튀는 것을 막는다")
+    w = torch.tensor(0.0, requires_grad=True)
+    b = torch.tensor(0.0, requires_grad=True)
+    x, y = make_data()
+    mse(w, b, x * 50, y * 50).backward()  # 입력 크기를 키워 기울기를 일부러 크게
+    before = torch.sqrt(w.grad**2 + b.grad**2).item()
+    torch.nn.utils.clip_grad_norm_([w, b], max_norm=1.0)
+    after = torch.sqrt(w.grad**2 + b.grad**2).item()
+    print(f"  기울기 벡터 길이(norm): clip 전 {before:.1f} -> clip 후 {after:.3f}  (방향은 그대로, 길이만 1.0으로)")
+    print("  train_lora.py: clip_grad_norm_(params, 1.0). 로그의 grad_norm이 자주 1을 크게 넘으면 lr을 낮추는 신호로 본다")
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--opt", choices=("sgd", "adamw"), default="adamw")
+    ap.add_argument("--lr", type=float, default=0.2)
+    ap.add_argument("--batch", type=int, default=8, help="한 번 forward에 넣는 예시 수")
+    ap.add_argument("--accum", type=int, default=1, help="몇 번 backward마다 optimizer step 할지")
+    ap.add_argument("--steps", type=int, default=60, help="optimizer step 수")
+    ap.add_argument("--warmup-ratio", type=float, default=0.1)
+    ap.add_argument("--clip", type=float, default=0.0, help="grad clipping 길이. 0이면 끔(train_lora.py는 1.0)")
+    args = ap.parse_args()
+    part_a_loop(args)
+    part_b_accumulation()
+    part_c_clipping()
+
+
+if __name__ == "__main__":
+    main()

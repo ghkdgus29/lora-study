@@ -1,9 +1,9 @@
-"""8단계: 작은 SFT 실험실 - train_lora.py와 같은 루프로 "미니 필터"를 학습하고, 파라미터를 바꿔 가며 결과를 비교한다.
+"""8단계: 작은 SFT 실험실 - 1~7단계의 조각을 하나의 학습 루프로 조립해 "미니 필터"를 학습하고, 파라미터를 바꿔 가며 결과를 비교한다.
 
-작업: 질문 1개 + 짧은 문서 4개 -> "[1] N\\n[2] Y\\n[3] N\\n[4] N" (필터 데이터의 축소판. 문서가 한 줄이라 맥에서 몇 분이면 돈다).
-val은 train에 없는 주제로만 만든다(filter_ft의 val이 train과 섹션이 겹치지 않게 한 것과 같은 이유).
+작업: 질문 1개 + 짧은 문서 4개 -> "[1] N\\n[2] Y\\n[3] N\\n[4] N" (실전 필터 데이터의 축소판. 문서가 한 줄이라 맥에서 몇 분이면 돈다).
+val은 train에 없는 주제로만 만든다(실전에서도 val과 train의 문서 출처가 겹치지 않게 나눈다).
 
-학습 루프·loss·encode는 train_lora.py에서 그대로 가져왔다(이름도 같다). 다른 것은 데이터가 작고, 끝나면 바로 평가한다는 것뿐.
+학습 루프·loss·encode는 실전 학습 스크립트(9단계)와 같다(이름도 같다). 다른 것은 데이터가 작고, 끝나면 바로 평가한다는 것뿐.
 
 실행
   uv run steps/08_sft_lab.py train --tag base_lr1e-4                       # 기본값(lr 1e-4, r 16, 40 step)
@@ -85,7 +85,7 @@ def make_data(n_train: int, n_val: int, seed: int) -> tuple[list[dict], list[dic
     return make_rows(train_topics, n_train, rng), make_rows(val_topics, n_val, rng)
 
 
-# ---------------------------------------------------------------- train_lora.py에서 그대로 가져온 부분
+# ---------------------------------------------------------------- 실전 학습 스크립트와 같은 부분 (5, 6단계)
 
 def encode(tok, messages: list[dict]) -> tuple[list[int], int]:
     kw = dict(tokenize=True, enable_thinking=False, return_dict=False)
@@ -106,7 +106,7 @@ def answer_loss(model, ids: torch.Tensor, p_len: int, y_id: int, y_weight: float
     return (ce * weight).sum() / weight.sum()
 
 
-# ---------------------------------------------------------------- 평가 (eval_filter.py의 score + report를 합친 것)
+# ---------------------------------------------------------------- 평가 (실전 평가 스크립트의 점수 매기기 + 지표 계산을 합친 것)
 
 def doc_probs(tok, gen_ids, step_logits, y_ids, n_ids, n_docs) -> list[float] | None:
     probs = []

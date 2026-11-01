@@ -1,6 +1,6 @@
 """2단계: 학습 루프의 뼈대 - optimizer, 배치, gradient accumulation, 학습률 스케줄, grad clipping.
 
-train_lora.py의 학습 루프를 파라미터 2개짜리(직선 맞추기) 문제로 그대로 재현한다.
+실전 LLM 학습 루프를 파라미터 2개짜리(직선 맞추기) 문제로 그대로 재현한다.
     opt = torch.optim.AdamW(params, lr=...)
     sched = LambdaLR(opt, warmup + 선형 감소)
     for 예시:
@@ -34,7 +34,7 @@ def mse(w, b, x, y) -> torch.Tensor:
 
 
 def make_scheduler(opt, total_steps: int, warmup_ratio: float):
-    """train_lora.py와 같은 스케줄: warmup 동안 0 -> lr 로 올리고, 그 뒤 total_steps에서 0이 되게 직선으로 내린다."""
+    """실전과 같은 스케줄: warmup 동안 0 -> lr 로 올리고, 그 뒤 total_steps에서 0이 되게 직선으로 내린다."""
     warmup = max(1, int(total_steps * warmup_ratio))
     return torch.optim.lr_scheduler.LambdaLR(opt, lambda s: s / warmup if s < warmup else max(0.0, (total_steps - s) / max(1, total_steps - warmup))), warmup
 
@@ -53,7 +53,7 @@ def part_a_loop(args) -> None:
     g = torch.Generator().manual_seed(1)
     opt_step, micro = 0, 0
     while opt_step < args.steps:
-        idx = torch.randint(0, len(x), (args.batch,), generator=g)  # 무작위로 batch개 뽑기 (train_lora는 순서를 섞어 하나씩)
+        idx = torch.randint(0, len(x), (args.batch,), generator=g)  # 무작위로 batch개 뽑기 (실전은 순서를 섞어 하나씩)
         loss = mse(w, b, x[idx], y[idx])
         (loss / args.accum).backward()  # accum개의 평균 기울기가 되도록 미리 나눈다
         micro += 1
@@ -84,7 +84,7 @@ def part_b_accumulation() -> None:
     (mse(w, b, x[16:32], y[16:32]) / 2).backward()  # 다음 16개
     print(f"  16개씩 두 번(각각 /2): w.grad = {w.grad.item():.6f}   <- 같다")
     print("  왜 쓰나: GPU 메모리에 한 번에 못 올리는 큰 배치를 작은 조각으로 나눠 같은 효과를 낸다.")
-    print("  train_lora.py는 예시 하나(8k~14k 토큰)씩 forward하고 8개마다 step -> '배치 8'과 같은 기울기")
+    print("  실전(긴 프롬프트)은 예시 하나(8k~14k 토큰)씩 forward하고 8개마다 step -> '배치 8'과 같은 기울기")
 
 
 def part_c_clipping() -> None:
@@ -98,7 +98,7 @@ def part_c_clipping() -> None:
     torch.nn.utils.clip_grad_norm_([w, b], max_norm=1.0)
     after = torch.sqrt(w.grad**2 + b.grad**2).item()
     print(f"  기울기 벡터 길이(norm): clip 전 {before:.1f} -> clip 후 {after:.3f}  (방향은 그대로, 길이만 1.0으로)")
-    print("  train_lora.py: clip_grad_norm_(params, 1.0). 로그의 grad_norm이 자주 1을 크게 넘으면 lr을 낮추는 신호로 본다")
+    print("  실전: clip_grad_norm_(params, 1.0). 로그의 grad_norm이 자주 1을 크게 넘으면 lr을 낮추는 신호로 본다")
 
 
 def main() -> None:
@@ -109,7 +109,7 @@ def main() -> None:
     ap.add_argument("--accum", type=int, default=1, help="몇 번 backward마다 optimizer step 할지")
     ap.add_argument("--steps", type=int, default=60, help="optimizer step 수")
     ap.add_argument("--warmup-ratio", type=float, default=0.1)
-    ap.add_argument("--clip", type=float, default=0.0, help="grad clipping 길이. 0이면 끔(train_lora.py는 1.0)")
+    ap.add_argument("--clip", type=float, default=0.0, help="grad clipping 길이. 0이면 끔(실전은 1.0)")
     args = ap.parse_args()
     part_a_loop(args)
     part_b_accumulation()

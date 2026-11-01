@@ -1,9 +1,9 @@
-# 9단계: train_lora.py · eval_filter.py 줄 단위 해설
+# 9단계: 전체 조립 - 실전 규모의 LoRA SFT 스크립트 줄 단위 해설
 
-**목표**: 1~8단계를 끝낸 뒤 실제 스크립트(`rag-portfolio/scripts/rag_optimize/filter_ft/train_lora.py`, `eval_filter.py`)를 처음부터 끝까지 읽고 "이 줄은 왜 있나"를 전부 말할 수 있게 한다.
-각 블록 옆에 어느 단계에서 배웠는지 적었다. 8단계의 `08_sft_lab.py`는 이 스크립트를 작은 데이터용으로 옮긴 것이라 같은 이름의 함수가 그대로 있다.
+**목표**: 1~8단계의 조각을 실전 규모(35B 모델, 프롬프트 8k~14k 토큰, 96GB GPU 한 장)로 조립한 학습 스크립트와 평가 스크립트를 처음부터 끝까지 읽고 "이 줄은 왜 있나"를 전부 말할 수 있게 한다.
+각 블록 옆에 어느 단계에서 배웠는지 적었다. 8단계의 `08_sft_lab.py`는 같은 구조를 작은 데이터용으로 줄인 것이라 같은 이름의 함수가 그대로 있다.
 
-## train_lora.py
+## 학습 스크립트
 
 ### 1. `encode(tok, messages)` → 5단계
 ```python
@@ -103,11 +103,11 @@ model.save_pretrained(args.out)
 - `max_mem_gb`: `torch.cuda.max_memory_allocated()`. 96GB에 들어가는지.
 
 ### 9. 로그 읽는 법 → 2, 6, 8단계
-- `loss`: 답 토큰 52개의 가중 cross-entropy 평균. 형식 토큰 42개는 금방 0이 되므로 **loss가 0.1 아래로 내려가도 Y/N을 잘 고른다는 뜻은 아니다**. sid F1은 eval_filter.py로.
+- `loss`: 답 토큰 52개의 가중 cross-entropy 평균. 형식 토큰 42개는 금방 0이 되므로 **loss가 0.1 아래로 내려가도 Y/N을 잘 고른다는 뜻은 아니다**. F1은 평가 스크립트로 따로 잰다.
 - loss가 오르거나 `nan`: lr을 낮춘다. 초반 수십 step은 warmup이라 원래 천천히 내려간다.
 - `lr`: 11 step까지 올라가고 그 뒤 선형 감소. 끝에서 0.
 
-## eval_filter.py
+## 평가 스크립트
 
 ### `score` → 4, 5단계
 ```python
@@ -122,12 +122,12 @@ out = model.generate(ids, max_new_tokens=128, do_sample=False, output_logits=Tru
 
 ### `report` → 3단계
 - `pick()`: 점수 ≥ 임계값인 문서. 없으면 최대 하나, 점수 없으면 1번(서비스 fallback).
-- `row_metrics()`: 후보 안 정답 번호 vs 고른 번호의 F1·precision·recall·exact (dspy_filter/metric.py와 같다).
+- `row_metrics()`: 후보 안 정답 번호 vs 고른 번호의 F1·precision·recall·exact.
 - 임계값을 안 주면 0.05~0.95를 훑어 F1 최대를 고른다(val용). 3단계 C에서 본 "가중치와 임계값은 같은 손잡이"가 여기서 쓰인다.
 
 ## 파라미터 → 경향 요약표
 
-| 파라미터 | ↑ 하면 | ↓ 하면 | train_lora.py 값과 이유 |
+| 파라미터 | ↑ 하면 | ↓ 하면 | 실전 값과 이유 |
 |---|---|---|---|
 | lr | 빨리 배우지만 진동·발산, 과적합 빠름 | 느림, step 더 필요 | 1e-4: LoRA 관례. loss가 오르면 5e-5 |
 | step 수 / epoch | 더 배움, 과적합 위험 | 덜 배움 | 1 epoch(368 step). val F1을 보고 2 epoch 고려 |

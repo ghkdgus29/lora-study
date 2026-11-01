@@ -1,6 +1,6 @@
 """3단계: 분류의 loss - logits, softmax, cross-entropy, 그리고 라벨 불균형과 가중치.
 
-train_lora.py의 answer_loss()가 쓰는 것:
+답 토큰 loss 함수 answer_loss()(6단계)가 쓰는 것:
     ce = F.cross_entropy(logits, targets, reduction="none")      # 토큰(=클래스)마다 -log P(정답)
     weight = where(targets == y_id, y_weight, 1.0)               # ' Y' 토큰에 가중치
     loss = (ce * weight).sum() / weight.sum()
@@ -30,7 +30,7 @@ def part_a_softmax_ce() -> None:
         ce_torch = F.cross_entropy(logits[None], torch.tensor([target]))  # cross_entropy는 softmax + -log 를 한 번에 한다
         print(f"정답이 {target}번이면: P(정답) = {probs[target].item():.4f}, cross-entropy = -log P = {ce_manual.item():.4f}  (F.cross_entropy = {ce_torch.item():.4f})")
     print("P(정답)이 1에 가까우면 loss 0, 0에 가까우면 loss가 끝없이 커진다 -> '확신하며 틀리는 것'에 큰 벌점")
-    print("train_lora.py 로그의 loss도 이 값이다: 답 토큰(52개)마다 -log P(정답 토큰)의 평균. 0.1이면 평균 P(정답) 약 0.9")
+    print("LLM 학습 로그의 loss도 이 값이다: 답 토큰(52개)마다 -log P(정답 토큰)의 평균. 0.1이면 평균 P(정답) 약 0.9")
 
 
 def part_b_gradient() -> None:
@@ -87,7 +87,7 @@ def part_c_imbalance(y_weight: float, steps: int) -> None:
         p, r, f = prf((p_y >= th).long(), t)
         print(f"    임계값 {th:.1f}: Y로 판정 {(p_y >= th).float().mean() * 100:4.1f}%  precision {p:.3f}  recall {r:.3f}  F1 {f:.3f}")
     print("  가중치를 올리면 P(Y) 전체가 위로 밀려 같은 임계값에서 recall이 오르고 precision이 내린다. 임계값을 내려도 비슷한 효과.")
-    print("  -> train_lora.py의 --y-weight와 eval_filter.py의 임계값 훑기는 같은 손잡이를 두 곳에서 돌리는 것이다")
+    print("  -> 학습 때의 y_weight와 평가 때의 임계값 훑기는 같은 손잡이를 두 곳에서 돌리는 것이다")
 
 
 def main() -> None:

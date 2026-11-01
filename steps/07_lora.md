@@ -19,10 +19,10 @@
 보정 행렬의 "폭". 파라미터 수가 r에 비례한다(0.6B: r 4 → 2.5M, 16 → 10M, 64 → 40M).
 - 작으면: 바꿀 수 있는 것이 적다 → 과적합 덜하고 빠르다. 간단한 작업(형식·분류)이면 8~16으로 충분한 경우가 많다.
 - 크면: 표현력 ↑, 메모리·어댑터 크기 ↑. 데이터가 적으면 이득이 거의 없다.
-- train_lora.py의 16은 "Y/N 판단"이 어려운 작업은 아니라고 보고 고른 보수적인 값.
+- 실전 설정의 16은 "Y/N 판단"이 어려운 작업은 아니라고 보고 고른 보수적인 값.
 
 ### alpha와 scale = alpha / r
-보정에 곱하는 배율. `alpha = 2r`(scale 2)이 관례이고 train_lora.py도 그렇다(16/32). r을 바꾸면 alpha도 같은 비율로 바꿔야 "보정의 세기"가 유지된다.
+보정에 곱하는 배율. `alpha = 2r`(scale 2)이 관례이고 실전 설정도 그렇다(16/32). r을 바꾸면 alpha도 같은 비율로 바꿔야 "보정의 세기"가 유지된다.
 scale을 키우는 것은 lr을 키우는 것과 비슷한 효과(보정이 출력에 더 크게 반영).
 
 ### target_modules
@@ -31,7 +31,7 @@ LoRA를 붙일 nn.Linear의 **이름 끝부분**. B에서 본 층 하나의 목�
 - Qwen3.6-35B에는 이 외에 Gated DeltaNet 층의 `in_proj_qkv, in_proj_z, out_proj`와 공유 expert가 있고, 256개 expert는 nn.Linear가 아니라 3차원 파라미터라 `target_parameters`(`--lora-experts`)로만 붙는다.
 
 ### dropout
-LoRA 경로에 넣는 dropout. 데이터가 적으면 0.05~0.1을 쓰기도 한다. train_lora.py는 0 - expert `target_parameters`가 dropout 0을 요구하고, 2,950문항 × 1 epoch라 과적합 여지가 적다.
+LoRA 경로에 넣는 dropout. 데이터가 적으면 0.05~0.1을 쓰기도 한다. 실전 설정은 0 - expert `target_parameters`가 dropout 0을 요구하고, 2,950문항 × 1 epoch라 과적합 여지가 적다.
 
 ## 실행하고 볼 것
 
@@ -53,10 +53,10 @@ uv run steps/07_lora.py
 
 **경향**: 파라미터 수는 r × (붙인 모듈의 입력+출력 차원 합)에 비례. 품질에 미치는 영향은 8단계에서 직접 잰다.
 
-## train_lora.py와의 연결
+## 실전 코드에서는
 ```python
-lora = LoraConfig(r=config.LORA_R, lora_alpha=config.LORA_ALPHA, lora_dropout=0.0, task_type="CAUSAL_LM",
-                  target_modules=config.LORA_TARGET_MODULES, target_parameters=... if args.lora_experts else None)
+lora = LoraConfig(r=16, lora_alpha=32, lora_dropout=0.0, task_type="CAUSAL_LM",
+                  target_modules=[...], target_parameters=... if args.lora_experts else None)
 model = get_peft_model(model, lora)                      # B
 model.print_trainable_parameters()                       # B
 params = [p for p in model.parameters() if p.requires_grad]   # A·B만 optimizer에 (얼린 W는 제외)

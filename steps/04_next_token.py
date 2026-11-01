@@ -1,8 +1,8 @@
 """4단계: LLM은 "다음 토큰 분류기"다 - 토크나이저, logits, greedy 생성, 그리고 "위치 t-1이 토큰 t를 예측한다".
 
 작은 모델(Qwen/Qwen3-0.6B, 1.4GB)을 맥에 올려 본다. 처음 실행하면 Hugging Face Hub에서 내려받는다(~/.cache/huggingface/hub).
-train_lora.py가 쓰는 것:  AutoTokenizer, AutoModelForCausalLM, model(input_ids=...).logits, tok.encode(" Y")
-eval_filter.py가 쓰는 것:  model.generate(..., output_logits=True), softmax의 P(Y) / (P(Y)+P(N))
+학습 쪽이 쓰는 것:  AutoTokenizer, AutoModelForCausalLM, model(input_ids=...).logits, tok.encode(" Y")
+평가 쪽이 쓰는 것:  model.generate(..., output_logits=True), softmax의 P(Y) / (P(Y)+P(N))
 
 실행:  uv run steps/04_next_token.py
        uv run steps/04_next_token.py --prompt "오늘 점심은" --max-new 12
@@ -37,7 +37,7 @@ def part_b_logits(tok, model, prompt: str, device: str) -> None:
     with torch.no_grad():
         logits = model(input_ids=ids).logits  # [1, L, 어휘]
     print(f"  input_ids.shape = {tuple(ids.shape)}  ->  logits.shape = {tuple(logits.shape)}  (위치마다 어휘 전체의 점수)")
-    print(f"  logits 하나가 차지하는 메모리: {logits.numel() * 4 / 1e6:.1f}MB (fp32 기준). 13,000토큰이면 {13000 * logits.shape[-1] * 4 / 1e9:.1f}GB -> train_lora.py가 logits_to_keep를 쓰는 이유")
+    print(f"  logits 하나가 차지하는 메모리: {logits.numel() * 4 / 1e6:.1f}MB (fp32 기준). 13,000토큰이면 {13000 * logits.shape[-1] * 4 / 1e9:.1f}GB -> 실전 코드가 logits_to_keep를 쓰는 이유(6단계)")
     probs = torch.softmax(logits[0, -1].float(), dim=-1)  # 마지막 위치 = '다음에 올 토큰'의 확률
     top = torch.topk(probs, 5)
     print("  마지막 위치의 상위 5개 토큰:")
@@ -59,7 +59,7 @@ def part_c_greedy(tok, model, prompt: str, device: str, max_new: int) -> None:
         gen = model.generate(ids, max_new_tokens=max_new, do_sample=False, pad_token_id=tok.pad_token_id)  # 라이브러리 함수
     print(f"  손으로:          {tok.decode(out[0, ids.shape[1]:])!r}")
     print(f"  model.generate:  {tok.decode(gen[0, ids.shape[1]:])!r}   <- 같다 (do_sample=False가 greedy)")
-    print("  eval_filter.py의 score는 이 generate에 output_logits=True를 줘서 매 step의 logits를 받아 Y/N 자리의 확률을 읽는다")
+    print("  평가 스크립트는 이 generate에 output_logits=True를 줘서 매 step의 logits를 받아 Y/N 자리의 확률을 읽는다")
 
 
 def part_d_teacher_forcing(tok, model, device: str) -> None:
@@ -78,7 +78,7 @@ def part_d_teacher_forcing(tok, model, device: str) -> None:
         p = probs[t, actual].item()
         print(f"  {t:4d}  {tok.decode([ids[0, t].item()])!r:14s} {tok.decode([pred])!r:16s} {tok.decode([actual])!r:10s} {p:12.3f}  {-torch.log(torch.tensor(p)).item():6.2f}")
     print("  -log P 열의 평균이 이 문장에 대한 cross-entropy loss. 학습은 이 값을 줄인다 = 실제 다음 토큰의 확률을 올린다")
-    print("  주의: 마지막 토큰 위치의 logits는 '그 다음'을 예측하는데 정답이 없으니 버린다 -> train_lora.py의 logits[0, :-1]")
+    print("  주의: 마지막 토큰 위치의 logits는 '그 다음'을 예측하는데 정답이 없으니 버린다 -> answer_loss()의 logits[0, :-1] (6단계)")
 
 
 def main() -> None:
@@ -90,7 +90,7 @@ def main() -> None:
 
     device = pick_device()
     tok = AutoTokenizer.from_pretrained(args.model)
-    model = AutoModelForCausalLM.from_pretrained(args.model, dtype=torch.bfloat16, device_map=device)  # train_lora.py와 같은 읽기 방식
+    model = AutoModelForCausalLM.from_pretrained(args.model, dtype=torch.bfloat16, device_map=device)  # 실전과 같은 읽기 방식(bf16, 한 장치에)
     model.eval()
     print(f"모델 {args.model} | 파라미터 {sum(p.numel() for p in model.parameters()) / 1e6:.0f}M | device {device} | dtype {next(model.parameters()).dtype}")
 

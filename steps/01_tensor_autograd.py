@@ -1,6 +1,6 @@
 """1단계: 텐서와 자동 미분(autograd), 그리고 "기울기를 따라 내려가기".
 
-train_lora.py의 이 세 줄이 무엇을 하는지 가장 작은 예로 본다.
+모든 학습 루프에 있는 이 세 줄이 무엇을 하는지 가장 작은 예로 본다.
     loss.backward()            # 기울기 계산
     opt.step()                 # 기울기 방향으로 파라미터 수정
     opt.zero_grad()            # 기울기 비우기
@@ -23,7 +23,10 @@ def part_a_tensor() -> None:
     print("x.shape =", tuple(x.shape), " (2행 3열)   x.dtype =", x.dtype)
     print("x * 2 =", (x * 2).tolist())
     print("x.sum() =", x.sum().item(), "  x.mean() =", round(x.mean().item(), 3))
-    # bf16: train_lora.py가 모델 가중치를 읽는 형식. 자릿수가 적어 메모리가 절반(fp32 4바이트 -> 2바이트)
+    # [None]: 맨 앞에 길이 1짜리 차원 추가. 토큰 id 리스트를 "문장 1개짜리 배치"로 만들 때 쓴다
+    ids = torch.tensor([5, 12, 7])
+    print("ids.shape =", tuple(ids.shape), " ids[None].shape =", tuple(ids[None].shape), "  <- [L] -> [1, L] (배치 차원 추가)")
+    # bf16: LLM 가중치를 올릴 때 흔히 쓰는 형식. 자릿수가 적어 메모리가 절반(fp32 4바이트 -> 2바이트)
     y = torch.tensor([1 / 3], dtype=torch.float32)
     print("1/3 을 fp32로:", y.item(), "  bf16으로:", y.to(torch.bfloat16).item(), "  <- bf16은 정밀도가 낮다(메모리 절반)")
 

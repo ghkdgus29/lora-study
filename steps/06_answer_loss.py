@@ -1,4 +1,4 @@
-"""6단계: 답 토큰에만 loss - train_lora.py의 answer_loss() 를 조각내서 확인한다.
+"""6단계: 답 토큰에만 loss - 답 토큰 loss 함수 answer_loss() 를 조각내서 확인한다.
 
     n_answer = ids.shape[1] - p_len
     out = model(input_ids=ids, logits_to_keep=n_answer + 1, use_cache=False)   # 마지막 A+1 위치의 logits만
@@ -31,7 +31,7 @@ def pick_device() -> str:
     return "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
 
 
-def encode(tok, messages):  # train_lora.py와 같다 (5단계)
+def encode(tok, messages):  # 5단계와 같다
     kw = dict(tokenize=True, enable_thinking=False, return_dict=False)
     full = tok.apply_chat_template(messages, **kw)
     prompt = tok.apply_chat_template(messages[:2], add_generation_prompt=True, **kw)
@@ -89,7 +89,7 @@ def part_c_mem_demo(model, tok, device: str, seq_len: int, y_id) -> None:
     text = "재고 수량이 안 맞아요. " * (seq_len // 8)
     ids = torch.tensor(tok.encode(text, add_special_tokens=False)[: seq_len - 8] + tok.encode("[1] Y\n[2] N", add_special_tokens=False), device=device)[None]
     p_len = ids.shape[1] - 9
-    model.enable_input_require_grads()  # 입력 임베딩부터 기울기가 흐르게 -> 모든 층의 활성값이 저장 대상이 된다 (train_lora.py와 같다)
+    model.enable_input_require_grads()  # 입력 임베딩부터 기울기가 흐르게 -> 모든 층의 활성값이 저장 대상이 된다 (실전 설정과 같다)
     for ckpt in (False, True):
         if ckpt:
             model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})

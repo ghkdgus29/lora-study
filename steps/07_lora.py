@@ -1,6 +1,6 @@
 """7단계: LoRA - 큰 가중치는 얼리고, 작은 '보정 행렬' 두 개만 학습한다.
 
-train_lora.py가 쓰는 것:
+실전 코드가 쓰는 것:
     lora = LoraConfig(r=16, lora_alpha=32, lora_dropout=0.0, task_type="CAUSAL_LM",
                       target_modules=[...q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj...])
     model = get_peft_model(model, lora); model.print_trainable_parameters()
@@ -21,7 +21,7 @@ import torch
 import torch.nn as nn
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-ALL_TARGETS = "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj"  # train_lora.py의 LORA_TARGET_MODULES 중 0.6B에 있는 것
+ALL_TARGETS = "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj"  # 0.6B 모델의 한 층에 있는 nn.Linear 전부
 
 
 class LoRALinear(nn.Module):
@@ -60,7 +60,7 @@ def part_a_manual(r: int, alpha: int) -> None:
         opt.step()
         opt.zero_grad()
     print(f"  5 step 뒤 출력이 원래와 같은가: {torch.allclose(lora(x), base(x))}   (B가 0에서 벗어나 보정이 생겼다). W는 그대로: {base.weight.grad is None}")
-    print(f"  scale = alpha/r = {alpha}/{r} = {alpha / r}: 보정의 세기. 관례는 alpha = 2r (train_lora.py: r 16, alpha 32 -> 2.0)")
+    print(f"  scale = alpha/r = {alpha}/{r} = {alpha / r}: 보정의 세기. 관례는 alpha = 2r (실전 설정: r 16, alpha 32 -> 2.0)")
 
 
 def part_b_peft(model_name: str, r: int, alpha: int, targets: list[str], device: str):

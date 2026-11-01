@@ -1,6 +1,6 @@
 """5단계: chat template - messages(system/user/assistant)가 토큰 시퀀스로 어떻게 펼쳐지고, 어디까지가 프롬프트(P)이고 어디부터가 답(A)인가.
 
-train_lora.py의 encode()를 그대로 따라간다:
+학습 데이터를 토큰으로 바꾸는 encode()를 그대로 따라간다:
     full   = tok.apply_chat_template(messages, tokenize=True, enable_thinking=False)              # system+user+assistant 전체
     prompt = tok.apply_chat_template(messages[:2], add_generation_prompt=True, enable_thinking=False)  # 답 직전까지
     assert full[:len(prompt)] == prompt                                                          # prompt는 full의 앞부분
@@ -41,7 +41,7 @@ def part_b_prefix(tok) -> tuple[list[int], list[int]]:
     print(f"  full   = {len(full)} 토큰 (system + user + assistant 답까지)")
     print(f"  prompt = {len(prompt)} 토큰 (답 직전까지)")
     print(f"  full[:len(prompt)] == prompt ?  {full[: len(prompt)] == prompt}   <- 그래서 '앞 P개 = 프롬프트, 그 뒤 = 답'으로 자를 수 있다")
-    print("  (이 성질이 깨지는 템플릿도 있어서 train_lora.py는 assert로 확인한다)")
+    print("  (이 성질이 깨지는 템플릿도 있어서 encode()는 assert로 확인한다)")
     return full, prompt
 
 
@@ -59,7 +59,7 @@ def part_c_boundary(tok, full: list[int], prompt: list[int]) -> None:
         elif i == 6:
             print("  ...")
     print(f"\n  P = {p_len}, A = {end + 1 - p_len} (답 {end + 1 - p_len - 1}토큰 + <|im_end|>), 버림 = {len(full) - end - 1} (템플릿이 <|im_end|> 뒤에 붙이는 '\\n')")
-    print("  train_lora.py encode()의 반환 = (full[:end+1], p_len). 뒤의 '\\n'은 모델이 <|im_end|>에서 멈추므로 배울 필요가 없다")
+    print("  encode()의 반환 = (full[:end+1], p_len). 뒤의 '\\n'은 모델이 <|im_end|>에서 멈추므로 배울 필요가 없다")
     print(f"  특수 토큰: <|im_start|>={tok.convert_tokens_to_ids('<|im_start|>')}, <|im_end|>={im_end} (= eos {tok.eos_token_id}), pad={tok.pad_token_id}")
 
 

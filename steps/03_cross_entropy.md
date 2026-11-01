@@ -1,6 +1,6 @@
 # 3단계: 분류의 loss - logits · softmax · cross-entropy · 라벨 가중치
 
-**목표**: train_lora.py의 `answer_loss()` 안에 있는 `F.cross_entropy`, `weight`, `(ce * weight).sum() / weight.sum()`이 무엇인지 안다.
+**목표**: 답 토큰 loss 함수(`answer_loss()`, 6단계) 안에 있는 `F.cross_entropy`, `weight`, `(ce * weight).sum() / weight.sum()`이 무엇인지 안다.
 LLM의 "다음 토큰 예측"은 어휘(Qwen3.6은 248,320개) 중 하나를 고르는 **분류 문제**이므로, 클래스 3개짜리로 보면 전부 보인다.
 
 ## 핵심 개념
@@ -8,14 +8,14 @@ LLM의 "다음 토큰 예측"은 어휘(Qwen3.6은 248,320개) 중 하나를 고
 ### logits → softmax → 확률
 - **logits**: 모델이 클래스마다 낸 점수. 아무 실수나 될 수 있다(음수도).
 - **softmax**: `exp(점수) / exp(점수)의 합`. 점수를 "합이 1인 확률"로 바꾼다. 점수 차이가 크면 확률이 한쪽으로 쏠린다.
-- LLM은 위치마다 어휘 전체에 대한 logits를 낸다 → shape `[배치, 길이, 어휘 수]`. train_lora.py가 `logits_to_keep`를 쓰는 이유가 여기서 나온다(6단계).
+- LLM은 위치마다 어휘 전체에 대한 logits를 낸다 → shape `[배치, 길이, 어휘 수]`. 실전 코드가 `logits_to_keep`를 쓰는 이유가 여기서 나온다(6단계).
 
 ### cross-entropy = -log P(정답)
 "정답 클래스에 준 확률"만 본다. 확률 1이면 loss 0, 확률 0.04면 3.2, 확률이 0에 가까우면 무한대.
 **확신하며 틀리는 것에 큰 벌점**을 주고, 맞는 것에 확신을 더하는 데는 보상이 작다(0.9 → 0.99는 loss 0.105 → 0.01).
 `F.cross_entropy(logits, target)`는 softmax와 -log를 한 번에, 수치적으로 안전하게 계산한다.
 
-train_lora.py 로그의 `loss`가 바로 이것이다: 답 토큰 52개마다 -log P(정답 토큰)의 (가중) 평균. loss 0.1이면 토큰마다 평균 확률 약 0.9.
+학습 로그의 `loss`가 바로 이것이다: 답 토큰 52개마다 -log P(정답 토큰)의 (가중) 평균. loss 0.1이면 토큰마다 평균 확률 약 0.9.
 
 ### 기울기 = softmax - one-hot
 cross-entropy를 logits로 미분하면 정확히 `확률 - 정답 one-hot`이다. 정답 클래스만 음수(점수를 올려라), 나머지는 양수(내려라).
@@ -48,9 +48,9 @@ uv run steps/03_cross_entropy.py
 - 그러면 가중치는 언제 중요한가: **임계값을 못 고르는 상황** - 서비스는 모델이 greedy로 낸 `Y`/`N` 글자를 그대로 쓴다(= 임계값 0.5 고정). 이때 가중치 1이면 recall 0.57, 가중치 3이면 0.75.
 - 너무 큰 가중치(9)는 임계값 0.5에서 precision이 0.44로 떨어진다. 필터는 precision이 떨어지면 답변에 엉뚱한 문서가 섞이므로 과하면 해롭다.
 
-이것이 README(filter_ft)에 적은 "첫 학습의 val Y 확률 분포를 보고 가중치를 정한다"의 뜻이다: 가중치 1로 학습한 모델의 P(Y) 분포를 보고, greedy(0.5)에서 Y를 너무 안 내면 가중치를 올리거나 임계값을 내린다.
+그래서 실전에서는 "첫 학습의 val Y 확률 분포를 보고 가중치를 정한다": 가중치 1로 학습한 모델의 P(Y) 분포를 보고, greedy(0.5)에서 Y를 너무 안 내면 가중치를 올리거나 임계값을 내린다.
 
-## train_lora.py와의 연결
+## 실전 코드에서는
 ```python
 ce = F.cross_entropy(logits, targets, reduction="none")   # 답 토큰마다 -log P(정답)   <- A
 weight = torch.where(targets == y_id, y_weight, 1.0)       # ' Y' 토큰만 가중치         <- C

@@ -1,16 +1,16 @@
 # 8단계: 작은 SFT 실험실 - 파라미터를 바꾸면 무엇이 달라지나
 
-**목표**: train_lora.py와 **같은 루프**(함수 이름까지 같다: `encode`, `answer_loss`)로 "미니 필터"를 학습하고, lr · step · r · y_weight · accum · target_modules를 하나씩 바꿔 가며 loss 곡선과 val 지표가 어떻게 움직이는지 직접 본다.
+**목표**: 1~7단계의 조각을 **하나의 학습 루프**(`encode`, `answer_loss`, LoRA, AdamW + 스케줄)로 조립해 "미니 필터"를 학습하고, lr · step · r · y_weight · accum · target_modules를 하나씩 바꿔 가며 loss 곡선과 val 지표가 어떻게 움직이는지 직접 본다.
 한 번 도는 데 맥에서 2분 안팎(학습 1분 + 평가 전/후 각 30초).
 
 ## 작업과 데이터
 
 - 질문 1개 + 한 줄짜리 문서 4개 → `[1] N\n[2] Y\n[3] N\n[4] N`. 필터 데이터의 축소판(문서 4개, 한 줄).
 - 주제 24개(ERP 메뉴). 주제마다 질문 말투 2개와 관련 문서 2개가 있고, 질문과 문서의 낱말을 조금 다르게 해서(동의어) 글자 맞추기만으로는 못 풀게 했다.
-- **val은 train에 없는 주제 4개로만** 만든다. filter_ft의 val이 train과 섹션이 겹치지 않게 한 것과 같은 이유: 겹치면 "외운 것"이 점수로 잡힌다.
+- **val은 train에 없는 주제 4개로만** 만든다. 실전 데이터도 val과 train의 문서 출처(섹션)가 겹치지 않게 나눈다. 겹치면 "외운 것"이 점수로 잡힌다.
 - Y 라벨 비율 32%(실제 데이터는 12%).
 
-## 평가 지표 (eval_filter.py와 같은 방식)
+## 평가 지표 (실전 평가 스크립트와 같은 방식)
 
 greedy로 생성 → 각 줄의 Y/N 자리에서 P(Y)/(P(Y)+P(N)).
 - **형식**: 4줄·번호 1~4를 지킨 문항 비율. 깨지면 그 문항의 Y는 전부 놓친 것으로 센다.
@@ -55,7 +55,7 @@ uv run steps/08_sft_lab.py train --tag base_lr1e-4
 
 - **lr**: 1e-5는 40 step 안에 다 못 배웠다(loss 0.07에서 아직 내려가는 중, N라벨 P(Y) 0.27로 "다 Y" 버릇이 남음). 1e-3은 train loss가 0.002까지 내려가 **train을 외웠지만** val F1은 기본과 같다 - 더 배운 게 아니라 더 외운 것. 1e-4는 그 사이. 이 작업에서는 1e-4~1e-3이 안전 범위이고 터지는 lr은 아직 안 봤다(`--lr 1e-2`를 직접 해 볼 것).
 - **step 수**: 10 step(예시 40개)은 모자라고(F1 0.69), 40과 120은 같다. 120 step은 60 step부터 loss 0.000 = **train을 완전히 외운 뒤 60 step을 더 돈 것**인데 val이 나빠지지는 않았다(장난감이라 그렇다. 데이터가 더 어렵고 다양하면 보통 내려간다). "loss가 0이다"는 성공의 신호가 아니라 **더 배울 게 없다는 신호**.
-- **r**: 4가 16·64보다 좋았다(0.83 vs 0.79 vs 0.78). 64는 recall이 0.75로 떨어지고 N라벨 P(Y)가 0.08까지 내려갔다 - 표현력이 커서 "N 쪽으로" 더 세게 밀린 것. **Y/N 판단처럼 단순한 작업은 작은 r로 충분**하고, 큰 r은 과적합 쪽으로 간다. train_lora.py의 16은 그 사이의 보수적인 값.
+- **r**: 4가 16·64보다 좋았다(0.83 vs 0.79 vs 0.78). 64는 recall이 0.75로 떨어지고 N라벨 P(Y)가 0.08까지 내려갔다 - 표현력이 커서 "N 쪽으로" 더 세게 밀린 것. **Y/N 판단처럼 단순한 작업은 작은 r로 충분**하고, 큰 r은 과적합 쪽으로 간다. 실전 설정의 16은 그 사이의 보수적인 값.
 - **target_modules**: q, v만(2.3M)으로도 전부(10M)와 같거나 나았다. 이 작업이 쉬워서다. 실제 35B에서는 DeltaNet·expert 층이 추가로 있어 다시 봐야 한다.
 - **y_weight 3**: recall 0.88 → 0.90, precision 0.72 → 0.70, P(Y)가 Y·N 라벨 모두 조금 위로(0.87/0.19 → 0.89/0.22). 3단계에서 본 방향 그대로이고 크기는 작다. 가중치는 **임계값이 0.5로 고정된 greedy 출력**에서 recall을 조금 사는 손잡이.
 - **accum 1**: 결과는 같지만 loss 궤적이 튄다(step 20에 0.21, 100에 0.12). 예시 하나의 기울기로 step을 밟으니 그 예시에 휘둘린다. accum 4~8이 곡선을 매끈하게 만든다.
@@ -79,9 +79,9 @@ uv run steps/08_sft_lab.py plot base_lr1e-4 lr1e-3 lr1e-5 steps10 steps120 r4 r6
 | seed만 바꾸면(잡음 크기) | `--tag seed1 --seed 1` - 기본과의 차이가 "잡음의 크기" |
 | gradient checkpointing의 시간 비용 | `--tag ckpt --checkpointing` - 결과는 같고 시간만 다르다 |
 
-## train_lora.py와의 연결
-`08_sft_lab.py`의 `encode`, `answer_loss`, 학습 루프(`order`, `(loss / accum).backward()`, `clip_grad_norm_`, `opt.step(); sched.step(); opt.zero_grad()`), `LoraConfig`, `save_pretrained`는 train_lora.py에서 그대로 가져왔다. 다른 점:
-- 데이터가 작아 전부 메모리에 있고, 예시가 모자라면 처음부터 다시 돈다(여러 epoch). train_lora.py는 1 epoch만.
-- 끝나면 바로 val을 평가한다. 실제는 `eval_filter.py score/report`로 따로(603문항, GPU에서 1시간).
-- gradient checkpointing은 기본 꺼짐(맥에서 0.6B, 200토큰이라 필요 없다). 실제는 켬.
-- `evaluate()`는 eval_filter.py의 `doc_scores` + `pick` + `row_metrics`를 합친 것.
+## 실전 코드와 다른 점
+`08_sft_lab.py`의 `encode`, `answer_loss`, 학습 루프(`order`, `(loss / accum).backward()`, `clip_grad_norm_`, `opt.step(); sched.step(); opt.zero_grad()`), `LoraConfig`, `save_pretrained`는 실전 학습 스크립트(9단계)와 글자 단위로 같다. 다른 점:
+- 데이터가 작아 전부 메모리에 있고, 예시가 모자라면 처음부터 다시 돈다(여러 epoch). 실전은 1 epoch만.
+- 끝나면 바로 val을 평가한다. 실전은 평가 스크립트로 따로(603문항, GPU에서 1시간).
+- gradient checkpointing은 기본 꺼짐(맥에서 0.6B, 200토큰이라 필요 없다). 실전은 켬.
+- `evaluate()`는 실전 평가 스크립트의 점수 매기기 + 임계값 판정 + 지표 계산을 하나로 합친 것.

@@ -13,6 +13,7 @@
        uv run steps/02_training_loop.py --opt sgd --lr 0.1
        uv run steps/02_training_loop.py --opt adamw --lr 0.1
        uv run steps/02_training_loop.py --accum 4 --steps 30
+       uv run steps/02_training_loop.py --by-hand       # md '손으로 계산해 보기'의 정답 (D)
 """
 
 import argparse
@@ -110,10 +111,91 @@ def main() -> None:
     ap.add_argument("--steps", type=int, default=60, help="optimizer step 수")
     ap.add_argument("--warmup-ratio", type=float, default=0.1)
     ap.add_argument("--clip", type=float, default=0.0, help="grad clipping 길이. 0이면 끔(실전은 1.0)")
+    ap.add_argument("--by-hand", action="store_true", help="md '손으로 계산해 보기'의 정답을 torch로 찍는다")
     args = ap.parse_args()
+    if args.by_hand:
+        part_d_by_hand()
+        return
     part_a_loop(args)
     part_b_accumulation()
     part_c_clipping()
+
+
+def part_d_by_hand() -> None:
+    """md '손으로 계산해 보기'와 같은 숫자. 예시 4개(y = 3x + 1 위의 점), w = b = 0에서 시작, loss = ½·mean((w·x + b − y)²)."""
+    torch.set_printoptions(precision=4)
+    x = torch.tensor([1.0, 2.0, -1.0, 0.0])
+    y = torch.tensor([4.0, 7.0, -2.0, 1.0])
+
+    def half_mse(w, b, xs, ys):
+        return 0.5 * ((w * xs + b - ys) ** 2).mean()
+
+    def grads(w, b, xs, ys):
+        w = w.detach().clone().requires_grad_(True)
+        b = b.detach().clone().requires_grad_(True)
+        half_mse(w, b, xs, ys).backward()
+        assert w.grad is not None and b.grad is not None
+        return w.grad.item(), b.grad.item()
+
+    print("=" * 70)
+    print("D. 손계산 검산. 예시 (x, y) = (1,4) (2,7) (−1,−2) (0,1).  w = b = 0")
+    w0, b0 = torch.tensor(0.0), torch.tensor(0.0)
+
+    print("\n[1] 예시별 기울기 (배치 1)")
+    for i in range(4):
+        gw, gb = grads(w0, b0, x[i : i + 1], y[i : i + 1])
+        print(f"  예시 {i + 1}: (x, y) = ({x[i].item():g}, {y[i].item():g})   dw = {gw:g}   db = {gb:g}")
+    gw4, gb4 = grads(w0, b0, x, y)
+    print(f"  배치 4 (평균):  dw = {gw4:g}   db = {gb4:g}")
+
+    print("\n[2] accumulation: 2개씩 두 번, 각각 loss/2 로 backward 해서 더하기")
+    w = torch.tensor(0.0, requires_grad=True)
+    b = torch.tensor(0.0, requires_grad=True)
+    (half_mse(w, b, x[:2], y[:2]) / 2).backward()
+    assert w.grad is not None and b.grad is not None
+    print(f"  앞 2개 /2 뒤:   w.grad = {w.grad.item():g}   b.grad = {b.grad.item():g}")
+    (half_mse(w, b, x[2:], y[2:]) / 2).backward()
+    print(f"  뒤 2개 /2 더함: w.grad = {w.grad.item():g}   b.grad = {b.grad.item():g}   <- 배치 4와 같다")
+
+    print("\n[3] clipping: 배치 4의 기울기 (dw, db)를 max_norm 1.0 으로")
+    w = torch.tensor(0.0, requires_grad=True)
+    b = torch.tensor(0.0, requires_grad=True)
+    half_mse(w, b, x, y).backward()
+    norm = torch.nn.utils.clip_grad_norm_([w, b], 1.0)
+    assert w.grad is not None and b.grad is not None
+    print(f"  clip 전 norm = {norm.item():.4f}   clip 후 (dw, db) = ({w.grad.item():.4f}, {b.grad.item():.4f})   norm = {(w.grad**2 + b.grad**2).sqrt().item():.4f}")
+
+    print("\n[4] SGD vs Adam, lr 0.1, step 2번 (clip 없음)")
+    for name in ("sgd", "adam"):
+        w = torch.tensor(0.0, requires_grad=True)
+        b = torch.tensor(0.0, requires_grad=True)
+        opt = torch.optim.SGD([w, b], lr=0.1) if name == "sgd" else torch.optim.AdamW([w, b], lr=0.1, weight_decay=0.0)
+        print(f"  {name}:")
+        for step in (1, 2):
+            loss = half_mse(w, b, x, y)
+            loss.backward()
+            assert w.grad is not None and b.grad is not None
+            gw, gb = w.grad.item(), b.grad.item()
+            opt.step()
+            opt.zero_grad()
+            extra = ""
+            if name == "adam":
+                st = opt.state[w]
+                extra = f"   [w의 상태: m = {st['exp_avg'].item():.4f}, v = {st['exp_avg_sq'].item():.6f}]"
+            print(f"    step {step}: loss {loss.item():.4f}  dw {gw:.4f}  db {gb:.4f}  ->  w {w.item():.4f}  b {b.item():.4f}{extra}")
+
+    print("\n[5] 스케줄 LambdaLR: total 10, warmup 2. step마다 lr 배수")
+    w = torch.tensor(0.0, requires_grad=True)
+    opt = torch.optim.SGD([w], lr=1.0)
+    sched, _ = make_scheduler(opt, 10, 0.2)
+    mults = [sched.get_last_lr()[0]]
+    for _ in range(10):
+        opt.step()
+        sched.step()
+        mults.append(sched.get_last_lr()[0])
+    print("  s     :", " ".join(f"{s:5d}" for s in range(11)))
+    print("  배수  :", " ".join(f"{m:5.3f}" for m in mults))
+    print("  <- s = 0 일 때 배수 0: warmup이 있으면 첫 optimizer step은 lr 0이라 파라미터가 안 움직인다")
 
 
 if __name__ == "__main__":

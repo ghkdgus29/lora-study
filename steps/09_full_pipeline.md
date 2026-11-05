@@ -59,7 +59,7 @@ model = AutoModelForCausalLM.from_pretrained(args.model, dtype=torch.bfloat16, d
 ```python
 model.config.use_cache = False                                                            # 생성용 캐시 끔
 model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})   # 활성값 저장 안 함(6단계 C)
-model.enable_input_require_grads()                                                        # checkpointing 구간으로 기울기가 흐르게
+model.enable_input_require_grads()                                                        # 옛 구현(use_reentrant=True)으로 바뀌어도 기울기가 흐르게 하는 안전장치(6단계 C)
 ```
 
 ### 6. LoRA → 7단계

@@ -45,6 +45,6 @@
 | `target_modules` | LoRA를 붙일 nn.Linear 이름 | 7 |
 | `target_parameters` | nn.Linear가 아닌 파라미터(MoE expert)에 붙일 때 | 7 |
 | 어댑터 (adapter) | 학습된 A, B들을 모은 폴더. `save_pretrained` 결과 | 7 |
-| PEFT | Hugging Face의 LoRA 등 "일부만 학습" 라이브러리 | 7 |
+| PEFT (Parameter-Efficient Fine-Tuning) | 파라미터의 일부만 학습하는 파인튜닝 기법들의 총칭(LoRA가 그중 하나). 그것을 구현한 Hugging Face 라이브러리 `peft`의 이름이기도 하다 | 7 |
 | 과적합 (overfitting) | train loss는 내려가는데 val 성능이 안 오르거나 내려감 | 8 |
 | MoE / expert | Qwen3.6-35B-A3B: 층마다 expert 256개 중 8개만 쓴다(총 35B, 활성 3B) | 7, 9 |

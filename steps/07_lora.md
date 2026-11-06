@@ -143,6 +143,31 @@ B·A = [1 0 2]       W + B·A = [3 0 3]       (W + B·A) x = [12, 15, 28]
 
 **왜 낮은 랭크로 충분한가.** 사전학습 모델은 이미 언어와 지식을 갖고 있으므로, 새 작업에 맞추는 데 필요한 변화는 소수의 방향을 조정하는 것으로 표현된다는 가설이다. LoRA 논문이 이 가설에서 출발했고, r이 한 자릿수여도 전체 파인튜닝에 가까운 결과를 보고했다. 증명된 사실이 아니라 실험으로 뒷받침된 가설이라, 작업이 사전학습과 많이 다를수록 더 큰 r이 필요할 수 있다.
 
+### PEFT - LoRA를 실제 모델에 붙여 주는 라이브러리
+PEFT는 **Parameter-Efficient Fine-Tuning**(파라미터 효율적 파인튜닝)의 줄임이다. 이 말은 두 가지를 가리킨다.
+
+1. **기법들의 이름.** 모델 전체를 학습하지 않고 파라미터의 작은 일부만 학습하는 파인튜닝 방법을 통틀어 PEFT라고 한다. LoRA가 그중 하나이고 가장 널리 쓰인다. prefix tuning, prompt tuning, IA³ 같은 다른 방법도 여기에 속한다.
+2. **라이브러리의 이름.** Hugging Face가 이 기법들을 구현해 둔 파이썬 패키지가 `peft`다. 코드의 `from peft import ...`가 이것이고, 이 문서에서 "PEFT가 ~한다"라고 쓴 것은 전부 이 라이브러리를 뜻한다.
+
+**왜 라이브러리가 필요한가.** 위에서 본 원리는 nn.Linear 하나에 `A`, `B`를 붙이는 것이었고, 스크립트 A 파트의 `LoRALinear`가 그것을 손으로 만든 것이다. 실제 모델에는 붙일 부품이 196개 있고(아래 `target_modules`), 얼리기·저장·불러오기도 해야 한다. PEFT는 이 일을 함수 몇 개로 대신 해 준다.
+
+| 할 일 | 손으로 하면 (스크립트 A 파트) | PEFT로 하면 (B, C 파트) |
+|---|---|---|
+| 설정 정하기 | `r`, `alpha`를 직접 넘긴다 | `LoraConfig(r=..., lora_alpha=..., target_modules=...)` |
+| 원래 가중치 얼리기 | `base.weight.requires_grad_(False)` | `get_peft_model`이 모델 전체를 얼린다 |
+| `A`, `B` 만들어 붙이기 | 부품마다 `LoRALinear(base, r, alpha)`로 감싼다 | `get_peft_model`이 이름이 맞는 부품을 전부 찾아 감싼다 |
+| 학습 파라미터 수 확인 | `numel()`을 직접 더한다 | `model.print_trainable_parameters()` |
+| 결과 저장 | `A`, `B`만 골라 직접 저장한다 | `model.save_pretrained(폴더)` |
+
+**함수별로 하는 일.**
+
+- **`LoraConfig`**: 설정값을 담는 객체다. 만들 때는 모델에 아무 일도 일어나지 않는다. 아래에서 설명하는 `r`, alpha(`lora_alpha`), `target_modules`, dropout(`lora_dropout`)이 전부 이 객체의 항목이다.
+- **`get_peft_model(model, lora)`**: 실제로 모델을 바꾼다. 모든 파라미터를 얼리고, `target_modules`에 이름이 맞는 nn.Linear를 "원래 `W` + `lora_A` + `lora_B`"를 가진 PEFT의 `Linear`로 바꿔 끼운다. 새로 생긴 `lora_A`, `lora_B`만 `requires_grad=True`다. 그래서 실전 코드가 `requires_grad`인 파라미터만 optimizer에 넘기면 LoRA만 학습된다.
+- **`print_trainable_parameters()`**: 학습되는 파라미터 수와 전체 대비 비율을 출력한다(`trainable%: 1.67`).
+- **`save_pretrained(폴더)`**: 어댑터만 저장한다. 폴더에는 `A`, `B` 값이 든 `adapter_model.safetensors`와 설정이 든 `adapter_config.json`이 생긴다. 원래 가중치는 저장하지 않으므로, 불러올 때는 원래 모델을 먼저 읽고 그 위에 어댑터를 붙인다(`PeftModel.from_pretrained(원래 모델, 폴더)`).
+
+PEFT가 하는 계산은 손으로 만든 `LoRALinear`와 같다. 스크립트의 A 파트와 B 파트가 둘 다 "학습 전 출력이 원래와 같은가: True"를 출력하는 것이 그 확인이다.
+
 ### r (rank)
 보정 경로의 "폭". `A x`의 결과가 숫자 r개다. 입력(1,024개)이 `A`를 지나며 r개로 줄고, `B`가 그것을 출력 크기(2,048개)로 다시 펼친다.
 
